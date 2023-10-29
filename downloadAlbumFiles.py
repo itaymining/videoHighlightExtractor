@@ -42,8 +42,8 @@ for album in albums['albums']:
 
 # Define the album ID and date range
 album_id = 'AChDSkQ_awFt3KKjgQ3ELHMn7sw177ijnlcKkYgZfgepb6Bon857PFI-Xw7TZi41bdBm0Mq1129p'
-start_date = '2022-11-01T00:00:00Z'  # Replace with your start date
-end_date = '2023-12-31T23:59:59Z'    # Replace with your end date
+start_date = '2022-10-29T00:00:00Z'  # Replace with your start date
+end_date = '2022-10-31T23:59:59Z'    # Replace with your end date
 
 next_page_token = None
 
