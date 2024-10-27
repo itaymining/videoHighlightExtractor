@@ -151,7 +151,193 @@ class VideoHighlightGenerator:
             logger.error(f"Failed to save highlight {output_filename}: {str(e)}")
             raise
 
-    # ... [previous methods remain the same until create_highlight_reel]
+    def find_video_files(self) -> List[Path]:
+        """
+        Find all video files in the input directory.
+        
+        Returns:
+            List[Path]: List of paths to video files
+        """
+        video_files = []
+        for ext in self.video_extensions:
+            video_files.extend(self.input_dir.glob(f'*{ext}'))
+        return video_files
+    
+    def analyze_motion(self, frame1: np.ndarray, frame2: np.ndarray) -> float:
+        """
+        Analyze motion between two frames using optical flow.
+        
+        Args:
+            frame1 (np.ndarray): First frame
+            frame2 (np.ndarray): Second frame
+            
+        Returns:
+            float: Motion score between 0 and 1
+        """
+        # Convert frames to grayscale
+        gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate optical flow
+        flow = cv2.calcOpticalFlowFarneback(
+            gray1, gray2, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        
+        # Calculate magnitude of flow vectors
+        magnitude = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
+        
+        # Return normalized average magnitude
+        return np.mean(magnitude) / 100.0  # Normalized to roughly 0-1 range
+    
+    def analyze_content(self, frame: np.ndarray) -> float:
+        """
+        Analyze frame content using ResNet50 for interestingness.
+        
+        Args:
+            frame (np.ndarray): Frame to analyze
+            
+        Returns:
+            float: Content interest score between 0 and 1
+        """
+        # Resize and preprocess frame
+        img = cv2.resize(frame, (224, 224))
+        img = image.img_to_array(img)
+        img = np.expand_dims(img, axis=0)
+        img = preprocess_input(img)
+        
+        # Get predictions
+        predictions = self.content_analyzer.predict(img, verbose=0)
+        
+        # Calculate "interestingness" based on prediction confidence
+        # Higher confidence in top predictions indicates more interesting content
+        top_5_confidence = np.sort(predictions[0])[-5:]
+        return float(np.mean(top_5_confidence))
+    
+    def detect_scenes(self, video_path: Path) -> List[Tuple[float, float]]:
+        """
+        Detect scene changes in video.
+        
+        Args:
+            video_path (Path): Path to video file
+            
+        Returns:
+            List[Tuple[float, float]]: List of (start_time, end_time) tuples
+        """
+        video = cv2.VideoCapture(str(video_path))
+        fps = video.get(cv2.CAP_PROP_FPS)
+        
+        scenes = []
+        prev_frame = None
+        current_scene_start = 0
+        frame_count = 0
+        
+        while True:
+            ret, frame = video.read()
+            if not ret:
+                break
+                
+            if prev_frame is not None:
+                # Check for scene change using content detector
+                if self.is_scene_change(prev_frame, frame):
+                    scene_end = frame_count / fps
+                    if scene_end - current_scene_start >= self.min_clip_duration:
+                        scenes.append((current_scene_start, scene_end))
+                    current_scene_start = scene_end
+            
+            prev_frame = frame
+            frame_count += 1
+        
+        video.release()
+        return scenes
+    
+    def is_scene_change(self, frame1: np.ndarray, frame2: np.ndarray) -> bool:
+        """
+        Detect if there is a scene change between two frames.
+        
+        Args:
+            frame1 (np.ndarray): First frame
+            frame2 (np.ndarray): Second frame
+            
+        Returns:
+            bool: True if scene change detected
+        """
+        # Convert to grayscale
+        gray1 = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate difference
+        diff = cv2.absdiff(gray1, gray2)
+        mean_diff = np.mean(diff)
+        
+        # Threshold for scene change
+        return mean_diff > 30
+    
+    def analyze_segment(self, video: VideoFileClip, start: float, end: float) -> float:
+        """
+        Analyze a video segment for interesting content.
+        
+        Args:
+            video (VideoFileClip): Video clip
+            start (float): Start time in seconds
+            end (float): End time in seconds
+            
+        Returns:
+            float: Segment interest score between 0 and 1
+        """
+        segment = video.subclip(start, end)
+        frames = list(segment.iter_frames())
+        
+        if len(frames) < 2:
+            return 0.0
+        
+        # Analyze motion
+        motion_scores = []
+        for i in range(len(frames) - 1):
+            motion_score = self.analyze_motion(frames[i], frames[i + 1])
+            motion_scores.append(motion_score)
+        
+        # Analyze content
+        content_scores = []
+        sample_frames = frames[::max(1, len(frames) // 5)]  # Sample every nth frame
+        for frame in sample_frames:
+            content_score = self.analyze_content(frame)
+            content_scores.append(content_score)
+        
+        # Combine scores (weight motion more heavily for highlights)
+        avg_motion = np.mean(motion_scores) if motion_scores else 0
+        avg_content = np.mean(content_scores) if content_scores else 0
+        
+        return 0.7 * avg_motion + 0.3 * avg_content
+    
+    def select_best_segments(self, 
+                           video_path: Path,
+                           scenes: List[Tuple[float, float]]) -> List[Tuple[float, float, float]]:
+        """
+        Select the best segments from the video based on analysis.
+        
+        Args:
+            video_path (Path): Path to video file
+            scenes (List[Tuple[float, float]]): List of scene timestamps
+            
+        Returns:
+            List[Tuple[float, float, float]]: List of (start_time, end_time, score)
+        """
+        video = VideoFileClip(str(video_path))
+        scored_segments = []
+        
+        for start, end in scenes:
+            # Limit segment duration
+            duration = end - start
+            if duration > self.max_clip_duration:
+                end = start + self.max_clip_duration
+            elif duration < self.min_clip_duration:
+                continue
+            
+            # Analyze segment
+            score = self.analyze_segment(video, start, end)
+            scored_segments.append((start, end, score))
+        
+        video.close()
+        return sorted(scored_segments, key=lambda x: x[2], reverse=True)
 
     def create_highlight_reel(self):
         """
@@ -296,3 +482,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    #pip install moviepy opencv-python scenedetect tensorflow numpy pillow tqdm
