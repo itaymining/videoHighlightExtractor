@@ -68,7 +68,7 @@ class VideoHighlightGenerator:
         
         # Create output directories
         self.setup_directories()
-        
+
     def setup_directories(self):
         """Create necessary output directories."""
         self.output_dir.mkdir(exist_ok=True)
@@ -347,82 +347,74 @@ class VideoHighlightGenerator:
         try:
             video_files = self.find_video_files()
             if not video_files:
-                raise ValueError(f"No video files found in {self.input_dir}")
-            
+                raise ValueError(f"No video files found in the specified input directories")
+
             all_segments = []
-            
+
             # Analyze all videos and save individual highlights
             logger.info("Analyzing videos and extracting highlights...")
             for video_path in tqdm(video_files):
-                # Detect scenes
-                scenes = self.detect_scenes(video_path)
-                
-                # Score and select best segments
-                scored_segments = self.select_best_segments(video_path, scenes)
-                
-                # Save top highlights for this video
-                for highlight_num, (start, end, score) in enumerate(
-                    scored_segments[:self.highlights_per_video], 1):
-                    self.save_individual_highlight(
-                        video_path, start, end, highlight_num, score)
-                
-                # Add to collection for combined highlight reel
-                all_segments.extend(
-                    (video_path, start, end, score) 
-                    for start, end, score in scored_segments)
-            
+                try:
+                    # Detect scenes
+                    scenes = self.detect_scenes(video_path)
+                    
+                    # Score and select best segments
+                    scored_segments = self.select_best_segments(video_path, scenes)
+                    
+                    # Save top highlights for this video
+                    for highlight_num, (start, end, score) in enumerate(
+                        scored_segments[:self.highlights_per_video], 1):
+                        try:
+                            self.save_individual_highlight(
+                                video_path, start, end, highlight_num, score)
+                        except Exception as e:
+                            logger.error(f"Failed to save highlight {highlight_num} for {video_path}: {e}")
+                            continue  # Skip to the next highlight if saving fails
+
+                    # Add to collection for combined highlight reel
+                    all_segments.extend(
+                        (video_path, start, end, score) 
+                        for start, end, score in scored_segments)
+
+                except Exception as e:
+                    logger.error(f"Failed to process video {video_path}: {e}")
+                    continue  # Skip to the next video if processing fails
+
             # Create combined highlight reel
             logger.info("Creating combined highlight reel...")
             
             # Sort all segments by score
             all_segments.sort(key=lambda x: x[3], reverse=True)
             
-            # Select segments for final video
-            final_segments = []
-            current_duration = 0
-            
+            # Select top segments until the target duration is reached
+            selected_clips = []
+            total_duration = 0
             for video_path, start, end, score in all_segments:
-                duration = end - start
-                if current_duration + duration <= self.target_duration:
-                    final_segments.append((video_path, start, end))
-                    current_duration += duration
-                if current_duration >= self.target_duration:
+                clip_duration = end - start
+                if total_duration + clip_duration > self.target_duration:
                     break
-            
-            # Create final combined video
-            clips = []
-            for video_path, start, end in tqdm(final_segments):
-                video = VideoFileClip(str(video_path))
-                clip = video.subclip(start, end)
-                clips.append(clip)
-                video.close()
-            
-            # Concatenate clips
-            final_video = concatenate_videoclips(clips, method="compose")
-            
-            # Write final combined video
-            output_path = self.output_dir / "combined_highlight_reel.mp4"
-            logger.info(f"Writing combined highlight reel to {output_path}...")
-            final_video.write_videofile(
-                str(output_path),
-                codec='libx264',
-                audio_codec='aac',
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True
-            )
-            
-            final_video.close()
-            
-            # Create summary report
-            self.create_summary_report()
-            
-            logger.info("Highlight extraction completed successfully!")
-            logger.info(f"Individual highlights saved in: {self.highlights_dir}")
-            logger.info(f"Combined highlight reel saved as: {output_path}")
-            
+                try:
+                    clip = VideoFileClip(str(video_path)).subclip(start, end)
+                    selected_clips.append(clip)
+                    total_duration += clip_duration
+                except Exception as e:
+                    logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
+                    continue  # Skip to the next segment if adding fails
+
+            # Concatenate and save the combined highlight reel
+            if selected_clips:
+                final_reel = concatenate_videoclips(selected_clips, method="compose")
+                output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
+                final_reel.write_videofile(
+                    str(output_reel_path), codec='libx264', audio_codec='aac'
+                )
+                logger.info(f"Combined highlight reel saved at: {output_reel_path}")
+            else:
+                logger.warning("No clips available for the combined highlight reel.")
+
         except Exception as e:
-            logger.error(f"Failed to create highlights: {str(e)}")
-            raise
+            logger.error(f"An error occurred while creating the highlight reel: {e}")
+
 
     def create_summary_report(self):
         """Create a summary report of all extracted highlights."""
@@ -460,7 +452,7 @@ def main():
     Main function to run the highlight generator.
     """
     # Configuration
-    INPUT_DIRS = ["input_videos_1", "input_videos_2", "input_videos_3"]  # List of input directories
+    INPUT_DIRS = ["2024-10"]  # List of input directories
     OUTPUT_DIR = "video_highlights"
     TARGET_DURATION = 180  # 3 minutes
     HIGHLIGHTS_PER_VIDEO = 5  # Number of highlights to extract per video
