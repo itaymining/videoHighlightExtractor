@@ -17,6 +17,7 @@ import shutil
 import face_recognition
 import cv2
 import numpy as np
+from collections import deque
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 from scenedetect import detect, ContentDetector
 from tensorflow.keras.applications import ResNet50
@@ -303,11 +304,11 @@ class VideoHighlightGenerator:
         face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
         
         for face_encoding in face_encodings:
-            matches = face_recognition.compare_faces(self.known_faces_encodings, face_encoding)
-            if any(matches):
+            distances = face_recognition.face_distance(self.known_faces_encodings, face_encoding)
+            if any(distance < 0.5 for distance in distances):  # Adjust threshold as needed
                 return True
         return False
-
+    
     def analyze_segment(self, video: VideoFileClip, start: float, end: float) -> float:
         """
         Analyze a video segment for interesting content.
@@ -343,6 +344,9 @@ class VideoHighlightGenerator:
         avg_motion = np.mean(motion_scores) if motion_scores else 0
         avg_content = np.mean(content_scores) if content_scores else 0
         
+        if not self.known_faces_encodings or not self.face_images_dir:
+            return 0.7 * avg_motion + 0.3 * avg_content, False
+
         # Face presence analysis
         face_duration = self.analyze_face_presence(frames)  # method to analyze face presence
         person_score = self.calculate_person_score(face_duration)  # Calculate score based on face presence
@@ -548,7 +552,7 @@ def main():
     """
     # Configuration
     INPUT_DIRS = ["2024-10"]  # List of input directories
-    OUTPUT_DIR = "video_highlights7"
+    OUTPUT_DIR = "video_highlights8"
     TARGET_DURATION = 180  # 3 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 10  # Maximum duration for each clip
