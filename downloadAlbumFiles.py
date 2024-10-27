@@ -5,6 +5,22 @@ from googleapiclient.discovery import build
 from datetime import datetime
 import requests
 
+
+def parse_datetime(timestamp):
+    formats = [
+        "%Y-%m-%dT%H:%M:%SZ",      # Format without milliseconds
+        "%Y-%m-%dT%H:%M:%S.%fZ"    # Format with milliseconds
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(timestamp, fmt)
+        except ValueError:
+            continue
+            
+    raise ValueError(f"Time data '{timestamp}' does not match any expected formats")
+
+
 # Set up API credentials
 creds = None
 SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
@@ -42,8 +58,8 @@ for album in albums['albums']:
 
 # Define the album ID and date range
 album_id = 'AChDSkQ_awFt3KKjgQ3ELHMn7sw177ijnlcKkYgZfgepb6Bon857PFI-Xw7TZi41bdBm0Mq1129p'
-start_date = '2022-10-29T00:00:00Z'  # Replace with your start date
-end_date = '2022-10-31T23:59:59Z'    # Replace with your end date
+start_date = '2023-10-30T00:00:00Z'  # Replace with your start date
+end_date = '2024-06-10T14:38:05Z'    # Replace with your end date
 
 next_page_token = None
 
@@ -59,7 +75,7 @@ while True:
     # Download videos
     for media_item in media_items['mediaItems']:
         if 'video' in media_item['mimeType']:
-            creation_date = datetime.strptime(media_item['mediaMetadata']['creationTime'], "%Y-%m-%dT%H:%M:%SZ")
+            creation_date = parse_datetime(media_item['mediaMetadata']['creationTime'])
             if start_date <= creation_date.isoformat() <= end_date:
                 month_folder = creation_date.strftime('%Y-%m')
                 if not os.path.exists(month_folder):
