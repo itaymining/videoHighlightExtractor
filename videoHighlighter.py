@@ -66,6 +66,7 @@ class VideoHighlightGenerator:
         self.face_images_dir = Path(face_images_dir) if face_images_dir else None
         self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
         self.has_face_only = has_face_only and bool(self.known_faces_encodings)
+        self.save_video_highlight_txt_metadata = save_video_highlight_txt_metadata
         self.fps = None  # Initialize fps
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
