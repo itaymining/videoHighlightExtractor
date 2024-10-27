@@ -33,6 +33,89 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+import numpy as np
+import cv2
+import face_recognition
+from typing import List, Tuple
+
+class FaceRecognizer:
+    def __init__(self, threshold: float = 0.5, min_matches: int = 3):
+        self.known_faces_encodings: List[np.ndarray] = []
+        self.threshold = threshold
+        self.min_matches = min_matches
+        
+    def add_known_face(self, face_encodings: List[np.ndarray]) -> None:
+        """Add known face encodings to the recognizer."""
+        self.known_faces_encodings.extend(face_encodings)
+        
+    def is_person_in_frame(self, frame: np.ndarray, min_face_size: int = 30) -> Tuple[bool, float]:
+        """
+        Check if the known person appears in the frame.
+        Returns: Tuple of (is_match: bool, confidence: float)
+        """
+        # Convert to RGB (face_recognition expects RGB)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Find faces in frame
+        face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+        
+        # Filter out small faces that are likely too far/small to be reliable
+        face_locations = [loc for loc in face_locations 
+                         if (loc[2] - loc[0]) >= min_face_size and (loc[1] - loc[3]) >= min_face_size]
+        
+        if not face_locations:
+            return False, 0.0
+            
+        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        
+        for face_encoding in face_encodings:
+            # Calculate distances to all known encodings
+            distances = face_recognition.face_distance(self.known_faces_encodings, face_encoding)
+            
+            # Count how many known faces match below threshold
+            matches = sum(1 for distance in distances if distance < self.threshold)
+            
+            # Calculate average distance for matches
+            matching_distances = [d for d in distances if d < self.threshold]
+            if matching_distances:
+                avg_distance = np.mean(matching_distances)
+                confidence = 1 - avg_distance  # Convert distance to confidence score
+                
+                # Return true if we have enough matches
+                if matches >= self.min_matches:
+                    return True, confidence
+                    
+        return False, 0.0
+    
+    def find_best_threshold(self, validation_frames: List[np.ndarray], 
+                          validation_labels: List[bool]) -> float:
+        """
+        Find the optimal threshold using validation data.
+        validation_frames: List of frames to test
+        validation_labels: True/False for each frame indicating if person is present
+        """
+        best_threshold = self.threshold
+        best_f1 = 0.0
+        
+        for threshold in np.arange(0.3, 0.7, 0.05):
+            self.threshold = threshold
+            predictions = [self.is_person_in_frame(frame)[0] for frame in validation_frames]
+            
+            # Calculate F1 score
+            tp = sum(1 for p, l in zip(predictions, validation_labels) if p and l)
+            fp = sum(1 for p, l in zip(predictions, validation_labels) if p and not l)
+            fn = sum(1 for p, l in zip(predictions, validation_labels) if not p and l)
+            
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+                
+        return best_threshold
+
 class VideoHighlightGenerator:
     def __init__(self, 
                  input_dirs: List[str],  # Changed from str to List[str]
@@ -48,6 +131,7 @@ class VideoHighlightGenerator:
                  keep_sort_processing_order: bool = True,  # Keep the order of processing
                  processing_order: str = "asc",  # Order of processing (asc or desc
                  pickle_path: str = None,  # Path to save known faces encodings
+                 max_video_duration_to_process: int = 600  # Maximum video duration to process
                  ):
         """
         Initialize the highlight generator.
@@ -76,9 +160,13 @@ class VideoHighlightGenerator:
         self.index = 0  # Initialize index
         self.pickle_path = Path(pickle_path)
         self.metadata_path = self.pickle_path.with_suffix('.meta.json')
-
+        self.max_video_duration_to_process = max_video_duration_to_process
         self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
+        self.face_recognizer = FaceRecognizer(threshold=0.5, min_matches=3)
         self.has_face_only = has_face_only and bool(self.known_faces_encodings)
+        # Add your known face encodings
+        if self.known_faces_encodings:
+            self.face_recognizer.add_known_face(self.known_faces_encodings)
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
         
@@ -251,11 +339,20 @@ class VideoHighlightGenerator:
         """
         video = cv2.VideoCapture(str(video_path))
         self.fps = video.get(cv2.CAP_PROP_FPS)
+        total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         
         scenes = []
         prev_frame = None
         current_scene_start = 0
         frame_count = 0
+
+        video_duration = total_frames / self.fps
+        
+        # Return empty if the video duration exceeds the max_video_duration_to_process
+        if video_duration > self.max_video_duration_to_process:
+            video.release()
+            logger.warning(f"Skipping video {video_path.name} as it exceeds the maximum duration allowed {self.max_video_duration_to_process:.2f}s for processing. {video_duration:.2f}s")
+            return []
         
         while True:
             ret, frame = video.read()
@@ -342,18 +439,6 @@ class VideoHighlightGenerator:
         # Save to pickle with metadata
         self._save_to_pickle(known_encodings, new_metadata)
         return known_encodings
-
-    def is_person_in_frame(self, frame: np.ndarray) -> bool:
-        """Check if the known person appears in the frame."""
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_frame)
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-        
-        for face_encoding in face_encodings:
-            distances = face_recognition.face_distance(self.known_faces_encodings, face_encoding)
-            if any(distance < 0.5 for distance in distances):  # Adjust threshold as needed
-                return True
-        return False
     
     def analyze_segment(self, video: VideoFileClip, start: float, end: float) -> float:
         """
@@ -410,9 +495,11 @@ class VideoHighlightGenerator:
             float: Duration in seconds that known faces are present in the frames
         """
         duration = 0
-        for frame in frames:
-            if self.known_faces_encodings and self.is_person_in_frame(frame):
-                duration += 1 / self.fps  # Assuming each frame represents 1/fps seconds
+        if self.known_faces_encodings:
+            for frame in frames:
+                is_match, confidence = self.face_recognizer.is_person_in_frame(frame)
+                if is_match:
+                    duration += 1 / self.fps  # Assuming each frame represents 1/fps seconds
                 
         return duration
 
@@ -505,7 +592,6 @@ class VideoHighlightGenerator:
                     all_segments.extend(
                         (video_path, start, end, index, score) 
                         for start, end, score, index in scored_segments)
-                    index += 1
 
                 except Exception as e:
                     logger.error(f"Failed to process video {video_path}: {e}")
@@ -597,32 +683,33 @@ def main():
     """
     # Configuration
     INPUT_DIRS = [  
-                    # "2023-10"
-                    # "2023-11",
-                    # "2023-12",
-                    # "2024-01",
-                    # "2024-02",
-                    # "2024-03",
-                    # "2024-04",
-                    # "2024-05",
-                    # "2024-06",
-                    # "2024-07",
-                    # "2024-08",
-                    # "2024-09",
+                    "2023-10",
+                    "2023-11",
+                    "2023-12",
+                    "2024-01",
+                    "2024-02",
+                    "2024-03",
+                    "2024-04",
+                    "2024-05",
+                    "2024-06",
+                    "2024-07",
+                    "2024-08",
+                    "2024-09",
                      "2024-10"
                   ]  # List of input directories
-    OUTPUT_DIR = "video_highlights11"
+    OUTPUT_DIR = "video_highlights_faces"
     PICKLE_PATH = "known_faces11"
-    TARGET_DURATION = 180  # 10 minutes
+    TARGET_DURATION = 600  # 10 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
-    MAX_CLIP_DURATION = 10  # Maximum duration for each clip
+    MAX_CLIP_DURATION = 12  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
-    HAS_FACE_ONLY = True  # Only include segments with faces
-    HIGHLIGHTS_PER_VIDEO = 5  # Number of highlights to extract per video
+    HAS_FACE_ONLY = False  # Only include segments with faces
+    HIGHLIGHTS_PER_VIDEO = 1  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
+    MAX_VIDEO_DURATION_TO_PROCESS = 180  # Maximum video duration to process
     
     try:
         # Create highlight generator
@@ -639,7 +726,8 @@ def main():
             face_images_dir=FACE_RECOGNITION_DIR,
             keep_sort_processing_order=KEEP_SORT_PROCESSING_ORDER,
             processing_order=PROCESSING_ORDER,
-            pickle_path=PICKLE_PATH
+            pickle_path=PICKLE_PATH,
+            max_video_duration_to_process=MAX_VIDEO_DURATION_TO_PROCESS
         )
         
         # Generate highlights
