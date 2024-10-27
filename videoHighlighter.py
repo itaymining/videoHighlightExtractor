@@ -39,6 +39,9 @@ class VideoHighlightGenerator:
                  target_duration: int = 180,
                  min_clip_duration: int = 3,
                  max_clip_duration: int = 10,
+                 face_detect_min_duration: int = 1,  # Minimum duration for face detection
+                 save_video_highlight_txt_metadata: bool = False,  # Save metadata in txt file
+                 has_face_only: bool = False,  # Only include segments with faces
                  highlights_per_video: int = 5, # Number of highlights to extract per video
                  face_images_dir: str = None  # Directory containing images of known faces
                  ):
@@ -59,9 +62,12 @@ class VideoHighlightGenerator:
         self.target_duration = target_duration
         self.min_clip_duration = min_clip_duration
         self.max_clip_duration = max_clip_duration
+        self.face_detect_min_duration = face_detect_min_duration
         self.highlights_per_video = highlights_per_video
         self.face_images_dir = Path(face_images_dir) if face_images_dir else None
         self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
+        self.has_face_only = has_face_only and bool(self.known_faces_encodings)
+        self.fps = None  # Initialize fps
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
         
@@ -126,13 +132,15 @@ class VideoHighlightGenerator:
             
             # Save metadata
             metadata_path = output_path.with_suffix('.txt')
-            with open(metadata_path, 'w') as f:
-                f.write(f"Original video: {video_path.name}\n")
-                f.write(f"Highlight {highlight_num}\n")
-                f.write(f"Start time: {start:.2f}s\n")
-                f.write(f"End time: {end:.2f}s\n")
-                f.write(f"Duration: {end-start:.2f}s\n")
-                f.write(f"Interest score: {score:.3f}\n")
+
+            if self.save_video_highlight_txt_metadata:
+                with open(metadata_path, 'w') as f:
+                    f.write(f"Original video: {video_path.name}\n")
+                    f.write(f"Highlight {highlight_num}\n")
+                    f.write(f"Start time: {start:.2f}s\n")
+                    f.write(f"End time: {end:.2f}s\n")
+                    f.write(f"Duration: {end-start:.2f}s\n")
+                    f.write(f"Interest score: {score:.3f}\n")
             
             # Save video
             logger.info(f"Saving highlight: {output_filename}")
@@ -226,7 +234,7 @@ class VideoHighlightGenerator:
             List[Tuple[float, float]]: List of (start_time, end_time) tuples
         """
         video = cv2.VideoCapture(str(video_path))
-        fps = video.get(cv2.CAP_PROP_FPS)
+        self.fps = video.get(cv2.CAP_PROP_FPS)
         
         scenes = []
         prev_frame = None
@@ -241,7 +249,7 @@ class VideoHighlightGenerator:
             if prev_frame is not None:
                 # Check for scene change using content detector
                 if self.is_scene_change(prev_frame, frame):
-                    scene_end = frame_count / fps
+                    scene_end = frame_count / self.fps
                     if scene_end - current_scene_start >= self.min_clip_duration:
                         scenes.append((current_scene_start, scene_end))
                     current_scene_start = scene_end
@@ -331,9 +339,48 @@ class VideoHighlightGenerator:
         avg_motion = np.mean(motion_scores) if motion_scores else 0
         avg_content = np.mean(content_scores) if content_scores else 0
         
-        person_score = 0.3 if self.known_faces_encodings and self.is_person_in_frame(frames[0]) else 0.0
-        return 0.7 * avg_motion + 0.3 * avg_content + person_score
-    
+        # Face presence analysis
+        face_duration = self.analyze_face_presence(frames)  # method to analyze face presence
+        person_score = self.calculate_person_score(face_duration)  # Calculate score based on face presence
+        has_face = face_duration > self.face_detect_min_duration  # Consider it a face if detected for more than 1 second
+        return 0.5 * avg_motion + 0.2 * avg_content + 0.3 * person_score, has_face
+
+    def analyze_face_presence(self, frames):
+        """
+        Analyze the presence of known faces in the frames and return the duration they appear.
+        
+        Args:
+            frames (list): List of frames to analyze
+            
+        Returns:
+            float: Duration in seconds that known faces are present in the frames
+        """
+        duration = 0
+        for frame in frames:
+            if self.known_faces_encodings and self.is_person_in_frame(frame):
+                duration += 1 / self.fps  # Assuming each frame represents 1/fps seconds
+                
+        return duration
+
+    def calculate_person_score(self, face_duration):
+        """
+        Calculate the person score based on the duration of face presence.
+        
+        Args:
+            face_duration (float): Duration in seconds
+            
+        Returns:
+            float: Score based on face presence duration
+        """
+        # Normalize face duration to a score between 0 and 1 (assuming self.max_clip_duration is the longest you'd expect)
+        normalized_duration = min(face_duration / self.max_clip_duration, self.min_clip_duration)
+        
+        # Add bonus if a known face is detected in the frame
+        bonus = 0.2 if face_duration > 0 else 0.0  # Bonus if any known face is detected
+        score = normalized_duration + bonus  # Base score based on duration plus bonus
+        
+        return score
+
     def select_best_segments(self, 
                            video_path: Path,
                            scenes: List[Tuple[float, float]]) -> List[Tuple[float, float, float]]:
@@ -359,8 +406,12 @@ class VideoHighlightGenerator:
                 continue
             
             # Analyze segment
-            score = self.analyze_segment(video, start, end)
-            scored_segments.append((start, end, score))
+            score, has_face = self.analyze_segment(video, start, end)
+            # Store segments that have faces
+            if self.has_face_only and has_face:  # Only add segments that contain a face
+                scored_segments.append((start, end, score))
+            elif not self.has_face_only:  # Add all segments
+                scored_segments.append((start, end, score))
         
         video.close()
         return sorted(scored_segments, key=lambda x: x[2], reverse=True)
@@ -478,10 +529,15 @@ def main():
     """
     # Configuration
     INPUT_DIRS = ["2024-10"]  # List of input directories
-    OUTPUT_DIR = "video_highlights2"
+    OUTPUT_DIR = "video_highlights5"
     TARGET_DURATION = 180  # 3 minutes
+    MIN_CLIP_DURATION = 3  # Minimum duration for each clip
+    MAX_CLIP_DURATION = 10  # Maximum duration for each clip
+    FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
+    HAS_FACE_ONLY = True  # Only include segments with faces
     HIGHLIGHTS_PER_VIDEO = 5  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
+    SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     
     try:
         # Create highlight generator
@@ -489,7 +545,12 @@ def main():
             input_dirs=INPUT_DIRS,
             output_dir=OUTPUT_DIR,
             target_duration=TARGET_DURATION,
-            highlights_per_video=HIGHLIGHTS_PER_VIDEO,
+            min_clip_duration = MIN_CLIP_DURATION,
+            max_clip_duration = MAX_CLIP_DURATION,
+            face_detect_min_duration = FACE_DETECT_MIN_DURATION,
+            save_video_highlight_txt_metadata = SAVE_VIDEO_HIGHLIGHT_TXT_METADATA,
+            has_face_only = HAS_FACE_ONLY,
+            highlights_per_video= HIGHLIGHTS_PER_VIDEO, 
             face_images_dir=FACE_RECOGNITION_DIR
         )
         
