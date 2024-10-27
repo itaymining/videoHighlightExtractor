@@ -8,7 +8,7 @@ This script analyzes videos in a directory to:
 3. Create a combined highlight reel
 """
 
-import os
+import json
 import logging
 from typing import List, Tuple, Dict
 from pathlib import Path
@@ -24,6 +24,7 @@ from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing import image
 from tqdm import tqdm
+import pickle
 
 # Configure logging
 logging.basicConfig(
@@ -45,7 +46,8 @@ class VideoHighlightGenerator:
                  highlights_per_video: int = 5, # Number of highlights to extract per video
                  face_images_dir: str = None,  # Directory containing images of known faces
                  keep_sort_processing_order: bool = True,  # Keep the order of processing
-                 processing_order: str = "asc"  # Order of processing (asc or desc
+                 processing_order: str = "asc",  # Order of processing (asc or desc
+                 pickle_path: str = None,  # Path to save known faces encodings
                  ):
         """
         Initialize the highlight generator.
@@ -67,13 +69,16 @@ class VideoHighlightGenerator:
         self.face_detect_min_duration = face_detect_min_duration
         self.highlights_per_video = highlights_per_video
         self.face_images_dir = Path(face_images_dir) if face_images_dir else None
-        self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
-        self.has_face_only = has_face_only and bool(self.known_faces_encodings)
         self.save_video_highlight_txt_metadata = save_video_highlight_txt_metadata
         self.keep_sort_processing_order = keep_sort_processing_order
         self.processing_order = processing_order
         self.fps = None  # Initialize fps
         self.index = 0  # Initialize index
+        self.pickle_path = Path(pickle_path)
+        self.metadata_path = self.pickle_path.with_suffix('.meta.json')
+
+        self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
+        self.has_face_only = has_face_only and bool(self.known_faces_encodings)
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
         
@@ -293,14 +298,48 @@ class VideoHighlightGenerator:
         # Threshold for scene change
         return mean_diff > 30
     
+    def _generate_metadata(self) -> dict:
+        """Generate metadata based on file modification times."""
+        metadata = {}
+        for image_path in self.face_images_dir.glob("*.jpg"):
+            metadata[str(image_path)] = image_path.stat().st_mtime
+        return metadata
+
+    def _metadata_matches(self, new_metadata: dict) -> bool:
+        """Check if current metadata matches the stored metadata."""
+        if not self.metadata_path.exists():
+            return False
+        with open(self.metadata_path, "r") as f:
+            stored_metadata = json.load(f)
+        return stored_metadata == new_metadata
+
+    def _save_to_pickle(self, encodings: List[np.ndarray], metadata: dict):
+        """Save encodings and metadata to pickle and JSON files."""
+        with open(self.pickle_path, "wb") as f:
+            pickle.dump(encodings, f)
+        with open(self.metadata_path, "w") as f:
+            json.dump(metadata, f)
+
     def load_known_faces(self) -> List[np.ndarray]:
-        """Load known face encodings from face_images_dir."""
+        """Load known face encodings, building cache if needed."""
+        new_metadata = self._generate_metadata()
+
+        # Load from cache if it exists and metadata matches
+        if self.pickle_path.exists() and self._metadata_matches(new_metadata):
+            with open(self.pickle_path, "rb") as f:
+                return pickle.load(f)
+
+        logger.info("Building known faces cache...")
+        # Otherwise, generate encodings and update cache
         known_encodings = []
         for image_path in self.face_images_dir.glob("*.jpg"):
             img = face_recognition.load_image_file(str(image_path))
             encoding = face_recognition.face_encodings(img)
             if encoding:
                 known_encodings.append(encoding[0])
+
+        # Save to pickle with metadata
+        self._save_to_pickle(known_encodings, new_metadata)
         return known_encodings
 
     def is_person_in_frame(self, frame: np.ndarray) -> bool:
@@ -556,7 +595,8 @@ def main():
     Main function to run the highlight generator.
     """
     # Configuration
-    INPUT_DIRS = [  "2023-10"
+    INPUT_DIRS = [  
+                    # "2023-10"
                     # "2023-11",
                     # "2023-12",
                     # "2024-01",
@@ -568,9 +608,10 @@ def main():
                     # "2024-07",
                     # "2024-08",
                     # "2024-09",
-                    # "2024-10"
+                     "2024-10"
                   ]  # List of input directories
     OUTPUT_DIR = "video_highlights11"
+    PICKLE_PATH = "known_faces11"
     TARGET_DURATION = 180  # 10 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 10  # Maximum duration for each clip
@@ -596,7 +637,8 @@ def main():
             highlights_per_video= HIGHLIGHTS_PER_VIDEO, 
             face_images_dir=FACE_RECOGNITION_DIR,
             keep_sort_processing_order=KEEP_SORT_PROCESSING_ORDER,
-            processing_order=PROCESSING_ORDER
+            processing_order=PROCESSING_ORDER,
+            pickle_path=PICKLE_PATH
         )
         
         # Generate highlights
