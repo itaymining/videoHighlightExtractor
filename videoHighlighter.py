@@ -184,11 +184,11 @@ class VideoHighlightGenerator:
             for ext in self.video_extensions:
                 video_files.extend(input_dir.rglob(f"*{ext}"))
         if self.processing_order == "asc":
-            return video_files.sort()
+            video_files.sort()
         elif self.processing_order == "desc":
-            return video_files.sort(reverse=True)
-        else:
-            return video_files
+            video_files.sort(reverse=True)
+        
+        return video_files
 
     def analyze_motion(self, frame1: np.ndarray, frame2: np.ndarray) -> float:
         """
@@ -326,6 +326,7 @@ class VideoHighlightGenerator:
 
         # Load from cache if it exists and metadata matches
         if self.pickle_path.exists() and self._metadata_matches(new_metadata):
+            logger.info("Loading known faces cache...")
             with open(self.pickle_path, "rb") as f:
                 return pickle.load(f)
 
@@ -491,7 +492,7 @@ class VideoHighlightGenerator:
                     scored_segments = self.select_best_segments(video_path, scenes)
                     
                     # Save top highlights for this video
-                    for highlight_num, (start, end, score) in enumerate(
+                    for highlight_num, (start, end, score, index) in enumerate(
                         scored_segments[:self.highlights_per_video], 1):
                         try:
                             self.save_individual_highlight(
