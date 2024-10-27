@@ -15,7 +15,7 @@ from typing import List, Tuple, Dict
 from pathlib import Path
 import random
 import shutil
-
+import face_recognition
 import cv2
 import numpy as np
 from moviepy.editor import VideoFileClip, concatenate_videoclips
@@ -39,7 +39,8 @@ class VideoHighlightGenerator:
                  target_duration: int = 180,
                  min_clip_duration: int = 3,
                  max_clip_duration: int = 10,
-                 highlights_per_video: int = 5  # Number of highlights to extract per video
+                 highlights_per_video: int = 5, # Number of highlights to extract per video
+                 face_images_dir: str = None  # Directory containing images of known faces
                  ):
         """
         Initialize the highlight generator.
@@ -59,7 +60,8 @@ class VideoHighlightGenerator:
         self.min_clip_duration = min_clip_duration
         self.max_clip_duration = max_clip_duration
         self.highlights_per_video = highlights_per_video
-        
+        self.face_images_dir = Path(face_images_dir) if face_images_dir else None
+        self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
         
@@ -272,6 +274,28 @@ class VideoHighlightGenerator:
         # Threshold for scene change
         return mean_diff > 30
     
+    def load_known_faces(self) -> List[np.ndarray]:
+        """Load known face encodings from face_images_dir."""
+        known_encodings = []
+        for image_path in self.face_images_dir.glob("*.jpg"):
+            img = face_recognition.load_image_file(str(image_path))
+            encoding = face_recognition.face_encodings(img)
+            if encoding:
+                known_encodings.append(encoding[0])
+        return known_encodings
+
+    def is_person_in_frame(self, frame: np.ndarray) -> bool:
+        """Check if the known person appears in the frame."""
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        face_locations = face_recognition.face_locations(rgb_frame)
+        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        
+        for face_encoding in face_encodings:
+            matches = face_recognition.compare_faces(self.known_faces_encodings, face_encoding)
+            if any(matches):
+                return True
+        return False
+
     def analyze_segment(self, video: VideoFileClip, start: float, end: float) -> float:
         """
         Analyze a video segment for interesting content.
@@ -307,7 +331,8 @@ class VideoHighlightGenerator:
         avg_motion = np.mean(motion_scores) if motion_scores else 0
         avg_content = np.mean(content_scores) if content_scores else 0
         
-        return 0.7 * avg_motion + 0.3 * avg_content
+        person_score = 0.3 if self.known_faces_encodings and self.is_person_in_frame(frames[0]) else 0.0
+        return 0.7 * avg_motion + 0.3 * avg_content + person_score
     
     def select_best_segments(self, 
                            video_path: Path,
@@ -453,9 +478,10 @@ def main():
     """
     # Configuration
     INPUT_DIRS = ["2024-10"]  # List of input directories
-    OUTPUT_DIR = "video_highlights"
+    OUTPUT_DIR = "video_highlights2"
     TARGET_DURATION = 180  # 3 minutes
     HIGHLIGHTS_PER_VIDEO = 5  # Number of highlights to extract per video
+    FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     
     try:
         # Create highlight generator
@@ -463,7 +489,8 @@ def main():
             input_dirs=INPUT_DIRS,
             output_dir=OUTPUT_DIR,
             target_duration=TARGET_DURATION,
-            highlights_per_video=HIGHLIGHTS_PER_VIDEO
+            highlights_per_video=HIGHLIGHTS_PER_VIDEO,
+            face_images_dir=FACE_RECOGNITION_DIR
         )
         
         # Generate highlights
@@ -476,4 +503,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-    #pip install moviepy opencv-python scenedetect tensorflow numpy pillow tqdm
+    #pip install moviepy opencv-python scenedetect tensorflow numpy pillow tqdm dlib
