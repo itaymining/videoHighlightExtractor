@@ -73,6 +73,7 @@ class VideoHighlightGenerator:
         self.keep_sort_processing_order = keep_sort_processing_order
         self.processing_order = processing_order
         self.fps = None  # Initialize fps
+        self.index = 0  # Initialize index
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
         
@@ -177,8 +178,13 @@ class VideoHighlightGenerator:
         for input_dir in self.input_dirs:
             for ext in self.video_extensions:
                 video_files.extend(input_dir.rglob(f"*{ext}"))
-        return video_files
-    
+        if self.processing_order == "asc":
+            return video_files.sort()
+        elif self.processing_order == "desc":
+            return video_files.sort(reverse=True)
+        else:
+            return video_files
+
     def analyze_motion(self, frame1: np.ndarray, frame2: np.ndarray) -> float:
         """
         Analyze motion between two frames using optical flow.
@@ -406,6 +412,7 @@ class VideoHighlightGenerator:
         scored_segments = []
         
         for start, end in scenes:
+            self.index += 1
             # Limit segment duration
             duration = end - start
             if duration > self.max_clip_duration:
@@ -417,9 +424,9 @@ class VideoHighlightGenerator:
             score, has_face = self.analyze_segment(video, start, end)
             # Store segments that have faces
             if self.has_face_only and has_face:  # Only add segments that contain a face
-                scored_segments.append((start, end, score))
+                scored_segments.append((start, end, score, self.index))
             elif not self.has_face_only:  # Add all segments
-                scored_segments.append((start, end, score))
+                scored_segments.append((start, end, score, self.index))
         
         video.close()
         return sorted(scored_segments, key=lambda x: x[2], reverse=True)
@@ -434,7 +441,6 @@ class VideoHighlightGenerator:
                 raise ValueError(f"No video files found in the specified input directories")
 
             all_segments = []
-            index = 0
             # Analyze all videos and save individual highlights
             logger.info("Analyzing videos and extracting highlights...")
             for video_path in tqdm(video_files):
@@ -457,8 +463,8 @@ class VideoHighlightGenerator:
 
                     # Add to collection for combined highlight reel
                     all_segments.extend(
-                        (video_path, start, end, score, index) 
-                        for start, end, score in scored_segments)
+                        (video_path, start, end, index, score) 
+                        for start, end, score, index in scored_segments)
                     index += 1
 
                 except Exception as e:
@@ -469,7 +475,7 @@ class VideoHighlightGenerator:
             logger.info("Creating combined highlight reel...")
             
             # Sort all segments by score
-            all_segments.sort(key=lambda x: x[3], reverse=True)
+            all_segments.sort(key=lambda x: x[4], reverse=True)
             
             # Select top segments until the target duration is reached
             selected_clips = []
@@ -480,7 +486,7 @@ class VideoHighlightGenerator:
                     break
                 try:
                     clip = VideoFileClip(str(video_path)).subclip(start, end)
-                    selected_clips.append((clip, index))
+                    selected_clips.append(clip)
                     total_duration += clip_duration
                 except Exception as e:
                     logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
@@ -489,16 +495,15 @@ class VideoHighlightGenerator:
             if self.keep_sort_processing_order:
                 if self.processing_order == "asc":
                     # Sort selected clips by their original indices
-                    selected_clips.sort(key=lambda x: x[1])
+                    selected_clips.sort(key=lambda x: x[3])
                 elif self.processing_order == "desc":
                     # Sort selected clips by their original indices in reverse
-                    selected_clips.sort(key=lambda x: x[1], reverse=True)
+                    selected_clips.sort(key=lambda x: x[3], reverse=True)
             else:
                 # randomly shuffle the selected clips
                 random.shuffle(selected_clips)
 
             # Extract only the clips for concatenation
-            final_clips = [clip for clip, original_index in selected_clips]
 
             # Concatenate and save the combined highlight reel
             if selected_clips:
@@ -551,9 +556,22 @@ def main():
     Main function to run the highlight generator.
     """
     # Configuration
-    INPUT_DIRS = ["2024-10"]  # List of input directories
-    OUTPUT_DIR = "video_highlights8"
-    TARGET_DURATION = 180  # 3 minutes
+    INPUT_DIRS = [  "2023-10"
+                    # "2023-11",
+                    # "2023-12",
+                    # "2024-01",
+                    # "2024-02",
+                    # "2024-03",
+                    # "2024-04",
+                    # "2024-05",
+                    # "2024-06",
+                    # "2024-07",
+                    # "2024-08",
+                    # "2024-09",
+                    # "2024-10"
+                  ]  # List of input directories
+    OUTPUT_DIR = "video_highlights11"
+    TARGET_DURATION = 180  # 10 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 10  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
