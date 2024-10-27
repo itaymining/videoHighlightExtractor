@@ -42,7 +42,9 @@ class VideoHighlightGenerator:
                  save_video_highlight_txt_metadata: bool = False,  # Save metadata in txt file
                  has_face_only: bool = False,  # Only include segments with faces
                  highlights_per_video: int = 5, # Number of highlights to extract per video
-                 face_images_dir: str = None  # Directory containing images of known faces
+                 face_images_dir: str = None,  # Directory containing images of known faces
+                 keep_sort_processing_order: bool = True,  # Keep the order of processing
+                 processing_order: str = "asc"  # Order of processing (asc or desc
                  ):
         """
         Initialize the highlight generator.
@@ -67,6 +69,8 @@ class VideoHighlightGenerator:
         self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
         self.has_face_only = has_face_only and bool(self.known_faces_encodings)
         self.save_video_highlight_txt_metadata = save_video_highlight_txt_metadata
+        self.keep_sort_processing_order = keep_sort_processing_order
+        self.processing_order = processing_order
         self.fps = None  # Initialize fps
         # Initialize AI models
         self.content_analyzer = ResNet50(weights='imagenet', include_top=True)
@@ -426,7 +430,7 @@ class VideoHighlightGenerator:
                 raise ValueError(f"No video files found in the specified input directories")
 
             all_segments = []
-
+            index = 0
             # Analyze all videos and save individual highlights
             logger.info("Analyzing videos and extracting highlights...")
             for video_path in tqdm(video_files):
@@ -449,8 +453,9 @@ class VideoHighlightGenerator:
 
                     # Add to collection for combined highlight reel
                     all_segments.extend(
-                        (video_path, start, end, score) 
+                        (video_path, start, end, score, index) 
                         for start, end, score in scored_segments)
+                    index += 1
 
                 except Exception as e:
                     logger.error(f"Failed to process video {video_path}: {e}")
@@ -465,17 +470,31 @@ class VideoHighlightGenerator:
             # Select top segments until the target duration is reached
             selected_clips = []
             total_duration = 0
-            for video_path, start, end, score in all_segments:
+            for video_path, start, end, score, index in all_segments:
                 clip_duration = end - start
                 if total_duration + clip_duration > self.target_duration:
                     break
                 try:
                     clip = VideoFileClip(str(video_path)).subclip(start, end)
-                    selected_clips.append(clip)
+                    selected_clips.append((clip, index))
                     total_duration += clip_duration
                 except Exception as e:
                     logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
                     continue  # Skip to the next segment if adding fails
+                    
+            if self.keep_sort_processing_order:
+                if self.processing_order == "asc":
+                    # Sort selected clips by their original indices
+                    selected_clips.sort(key=lambda x: x[1])
+                elif self.processing_order == "desc":
+                    # Sort selected clips by their original indices in reverse
+                    selected_clips.sort(key=lambda x: x[1], reverse=True)
+            else:
+                # randomly shuffle the selected clips
+                random.shuffle(selected_clips)
+
+            # Extract only the clips for concatenation
+            final_clips = [clip for clip, original_index in selected_clips]
 
             # Concatenate and save the combined highlight reel
             if selected_clips:
@@ -529,7 +548,7 @@ def main():
     """
     # Configuration
     INPUT_DIRS = ["2024-10"]  # List of input directories
-    OUTPUT_DIR = "video_highlights5"
+    OUTPUT_DIR = "video_highlights7"
     TARGET_DURATION = 180  # 3 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 10  # Maximum duration for each clip
@@ -538,6 +557,8 @@ def main():
     HIGHLIGHTS_PER_VIDEO = 5  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
+    KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
+    PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
     
     try:
         # Create highlight generator
@@ -551,7 +572,9 @@ def main():
             save_video_highlight_txt_metadata = SAVE_VIDEO_HIGHLIGHT_TXT_METADATA,
             has_face_only = HAS_FACE_ONLY,
             highlights_per_video= HIGHLIGHTS_PER_VIDEO, 
-            face_images_dir=FACE_RECOGNITION_DIR
+            face_images_dir=FACE_RECOGNITION_DIR,
+            keep_sort_processing_order=KEEP_SORT_PROCESSING_ORDER,
+            processing_order=PROCESSING_ORDER
         )
         
         # Generate highlights
