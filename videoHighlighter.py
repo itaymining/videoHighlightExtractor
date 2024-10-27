@@ -8,7 +8,6 @@ This script analyzes videos in a directory to:
 3. Create a combined highlight reel
 """
 
-# ... [previous imports remain the same]
 import os
 import logging
 from typing import List, Tuple, Dict
