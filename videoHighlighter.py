@@ -289,7 +289,7 @@ class VideoHighlightGenerator:
         """
         video_files = []
         for ext in self.video_extensions:
-            video_files.extend(self.input_dirs.rglob(f"*{ext}"))
+            video_files.extend(self.output_dir.rglob(f"*{ext}"))
         if self.processing_order == "asc":
             video_files.sort()
         elif self.processing_order == "desc":
@@ -731,36 +731,54 @@ class VideoHighlightGenerator:
         # Extract only the clips for concatenation
         target_width = 1920
         target_height = 1080
-        selected_clips = [clip for clip, _, _, _, _ in selected_clips]
+        selected_clips = [clip for clip, _, _, _, _, _ in selected_clips]
 
-        if selected_clips:
-            resized_clips = []
-            for clip in selected_clips:
-                clip_width, clip_height = clip.size
+        if not selected_clips:
+            logger.warning("No clips available for processing.")
+            return None
 
-                if clip_width > clip_height:  # Landscape
-                    # Resize to target resolution directly
-                    resized_clip = resize(clip, width=target_width, height=target_height)
-                else:  # Portrait
-                    # Resize to fit the height and maintain aspect ratio
-                    resized_clip = resize(clip, height=target_height)
-                    # Center and add letterboxing
-                    letterbox_width = target_width - resized_clip.size[0]
-                    if letterbox_width > 0:
-                        # Use padding to add letterbox effect if necessary
-                        resized_clip = resized_clip.margin(left=letterbox_width // 2, right=letterbox_width // 2)
+        # Create a clips directory if it doesn't exist
+        clips_dir = self.output_dir / "individual_clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
 
-                resized_clips.append(resized_clip)
+        resized_clips = []
+        for index, clip in enumerate(selected_clips, 1):
+            clip_width, clip_height = clip.size
 
-            # Concatenate and save the combined highlight reel
-            final_reel = concatenate_videoclips(resized_clips, method="compose")
-            output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
-            final_reel.write_videofile(
-                str(output_reel_path), codec='libx264', audio_codec='aac', bitrate='8000k'
+            if clip_width > clip_height:  # Landscape
+                resized_clip = resize(clip, width=target_width, height=target_height)
+            else:  # Portrait
+                resized_clip = resize(clip, height=target_height)
+                letterbox_width = target_width - resized_clip.size[0]
+                if letterbox_width > 0:
+                    resized_clip = resized_clip.margin(
+                        left=letterbox_width // 2, 
+                        right=letterbox_width // 2
+                    )
+
+            # Save individual clip
+            clip_filename = f"clip_{index:03d}.mp4"  # This will create names like clip_001.mp4
+            clip_path = clips_dir / clip_filename
+            resized_clip.write_videofile(
+                str(clip_path),
+                codec='libx264',
+                audio_codec='aac',
+                bitrate='8000k'
             )
-            logger.info(f"Combined highlight reel saved at: {output_reel_path}")
-        else:
-            logger.warning("No clips available for the combined highlight reel.")
+            logger.info(f"Saved individual clip {index} at: {clip_path}")
+            logger.info(f"Progress: {index}/{len(selected_clips)}")
+            resized_clips.append(resized_clip)
+
+        # Concatenate and save the combined highlight reel
+        final_reel = concatenate_videoclips(resized_clips, method="compose")
+        output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
+        final_reel.write_videofile(
+            str(output_reel_path),
+            codec='libx264',
+            audio_codec='aac',
+            bitrate='8000k'
+        )
+        logger.info(f"Combined highlight reel saved at: {output_reel_path}")
 
     def create_summary_report(self):
         """Create a summary report of all extracted highlights."""
@@ -819,12 +837,12 @@ def main():
 
     OUTPUT_DIR = "video_highlights_no_face4"
     PICKLE_PATH = "known_faces11"
-    TARGET_DURATION = 600  # 10 minutes
+    TARGET_DURATION = 600  # 15 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
-    MAX_CLIP_DURATION = 12  # Maximum duration for each clip
+    MAX_CLIP_DURATION = 6  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
     HAS_FACE_ONLY = False  # Only include segments with faces
-    HIGHLIGHTS_PER_VIDEO = 1  # Number of highlights to extract per video
+    HIGHLIGHTS_PER_VIDEO = 2  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = ""  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
@@ -850,10 +868,12 @@ def main():
             max_video_duration_to_process=MAX_VIDEO_DURATION_TO_PROCESS
         )
         
-        # # Generate highlights by existing videos
-        # generator.create_highlight_reel_by_existing_clips()
+        
         # Generate highlights
         generator.create_highlight_reel()
+
+        # # Generate highlights by existing videos
+        # generator.create_highlight_reel_by_existing_clips()
         
     except Exception as e:
         logger.error(f"Program failed: {str(e)}")
