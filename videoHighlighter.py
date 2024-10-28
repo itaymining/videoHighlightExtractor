@@ -7,7 +7,7 @@ This script analyzes videos in a directory to:
 2. Save them separately in a highlights folder
 3. Create a combined highlight reel
 """
-
+import os
 import json
 import logging
 from typing import List, Tuple, Dict
@@ -273,6 +273,23 @@ class VideoHighlightGenerator:
         for input_dir in self.input_dirs:
             for ext in self.video_extensions:
                 video_files.extend(input_dir.rglob(f"*{ext}"))
+        if self.processing_order == "asc":
+            video_files.sort()
+        elif self.processing_order == "desc":
+            video_files.sort(reverse=True)
+        
+        return video_files
+    
+    def get_video_clips_from_output_dir(self) -> List[Path]:
+        """
+        Find all video files in the input directories.
+        
+        Returns:
+            List[Path]: List of paths to video files
+        """
+        video_files = []
+        for ext in self.video_extensions:
+            video_files.extend(self.input_dirs.rglob(f"*{ext}"))
         if self.processing_order == "asc":
             video_files.sort()
         elif self.processing_order == "desc":
@@ -572,114 +589,178 @@ class VideoHighlightGenerator:
         Create individual highlights and a combined highlight reel.
         """
         try:
-            video_files = self.find_video_files()
-            if not video_files:
-                raise ValueError(f"No video files found in the specified input directories")
+            # File to save the scored segments
+            scored_segments_file = self.output_dir / "scored_segments.pkl"
+            if os.path.exists(scored_segments_file):
+                # Load scored segments from file
+                logger.info("Loading scored segments from file...")
+                with open(scored_segments_file, 'rb') as f:
+                    all_segments = pickle.load(f)
+            else:
+                video_files = self.find_video_files()
+                if not video_files:
+                    raise ValueError(f"No video files found in the specified input directories")
 
-            all_segments = []
-            # Analyze all videos and save individual highlights
-            logger.info("Analyzing videos and extracting highlights...")
-            for video_path in tqdm(video_files):
-                try:
-                    # Detect scenes
-                    scenes = self.detect_scenes(video_path)
-                    
-                    # Score and select best segments
-                    scored_segments = self.select_best_segments(video_path, scenes)
-                    
-                    # Save top highlights for this video
-                    for highlight_num, (start, end, score, index) in enumerate(
-                        scored_segments[:self.highlights_per_video], 1):
-                        try:
-                            self.save_individual_highlight(
-                                video_path, start, end, highlight_num, score)
-                        except Exception as e:
-                            logger.error(f"Failed to save highlight {highlight_num} for {video_path}: {e}")
-                            continue  # Skip to the next highlight if saving fails
+                all_segments = []
+                # Analyze all videos and save individual highlights
+                logger.info("Analyzing videos and extracting highlights...")
+                for video_path in tqdm(video_files):
+                    try:
+                        # Detect scenes
+                        scenes = self.detect_scenes(video_path)
+                        
+                        # Score and select best segments
+                        scored_segments = self.select_best_segments(video_path, scenes)
+                        
+                        # Save top highlights for this video
+                        for highlight_num, (start, end, score, index) in enumerate(
+                            scored_segments[:self.highlights_per_video], 1):
+                            try:
+                                self.save_individual_highlight(
+                                    video_path, start, end, highlight_num, score)
+                            except Exception as e:
+                                logger.error(f"Failed to save highlight {highlight_num} for {video_path}: {e}")
+                                continue  # Skip to the next highlight if saving fails
 
-                    # Add to collection for combined highlight reel
-                    all_segments.extend(
-                        (video_path, start, end, index, score) 
-                        for start, end, score, index in scored_segments)
+                        # Add to collection for combined highlight reel
+                        all_segments.extend(
+                            (video_path, start, end, index, score) 
+                            for start, end, score, index in scored_segments)
 
-                except Exception as e:
-                    logger.error(f"Failed to process video {video_path}: {e}")
-                    continue  # Skip to the next video if processing fails
-
+                    except Exception as e:
+                        logger.error(f"Failed to process video {video_path}: {e}")
+                        continue  # Skip to the next video if processing fails
+                # Save the scored segments to a file
+                logger.info("Saving scored segments to file...")
+                with open(scored_segments_file, 'wb') as f:
+                    pickle.dump(all_segments, f)
+            
             # Create combined highlight reel
             logger.info("Creating combined highlight reel...")
             
             # Sort all segments by score
             all_segments.sort(key=lambda x: x[4], reverse=True)
-            
-            # Select top segments until the target duration is reached
-            selected_clips = []
-            total_duration = 0
-            for video_path, start, end, index, score in all_segments:
-                clip_duration = end - start
-                if total_duration + clip_duration > self.target_duration:
-                    break
-                try:
-                    clip = VideoFileClip(str(video_path)).subclip(start, end)
-                    selected_clips.append((clip, start, end, index, score, video_path))
-                    total_duration += clip_duration
-                except Exception as e:
-                    logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
-                    continue  # Skip to the next segment if adding fails
-                    
-            if self.keep_sort_processing_order:
-                if self.processing_order == "asc":
-                    # Sort selected clips by their original indices
-                    selected_clips.sort(key=lambda x: x[3])
-                elif self.processing_order == "desc":
-                    # Sort selected clips by their original indices in reverse
-                    selected_clips.sort(key=lambda x: x[3], reverse=True)
-            else:
-                # randomly shuffle the selected clips
-                random.shuffle(selected_clips)
+            self.select_and_concatenate_clips(all_segments)
 
-
-            # Concatenate and save the combined highlight reel
-            # Extract only the clips for concatenation
-            # Define the target resolution
-            target_width = 1920
-            target_height = 1080
-
-            # Extract only the clips for concatenation
-            selected_clips = [clip for clip, _, _, _, _ in selected_clips]
-            
-            if selected_clips:
-                resized_clips = []
-                for clip in selected_clips:
-                    clip_width, clip_height = clip.size
-                    
-                    if clip_width > clip_height:  # Landscape
-                        # Resize to target resolution directly
-                        resized_clip = resize(clip, width=target_width, height=target_height)
-                    else:  # Portrait
-                        # Resize to fit the height and maintain aspect ratio
-                        resized_clip = resize(clip, height=target_height)
-                        # Center and add letterboxing
-                        letterbox_width = target_width - resized_clip.size[0]
-                        if letterbox_width > 0:
-                            # Use padding to add letterbox effect if necessary
-                            resized_clip = resized_clip.margin(left=letterbox_width//2, right=letterbox_width//2)
-
-                    resized_clips.append(resized_clip)
-
-                # Concatenate and save the combined highlight reel
-                final_reel = concatenate_videoclips(resized_clips, method="compose")
-                output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
-                final_reel.write_videofile(
-                    str(output_reel_path), codec='libx264', audio_codec='aac', bitrate='8000k'
-                )
-                logger.info(f"Combined highlight reel saved at: {output_reel_path}")
-            else:
-                logger.warning("No clips available for the combined highlight reel.")
         except Exception as e:
             logger.error(f"Failed to create highlight reel: {str(e)}")
             raise
 
+    def create_highlight_reel_by_existing_clips(self):
+        """
+        combined highlight reel.
+        """
+        try:
+            # File to save the scored segments
+            scored_segments_file = self.output_dir / "scored_segments.pkl"
+
+            if os.path.exists(scored_segments_file):
+                # Load scored segments from file
+                logger.info("Loading scored segments from file...")
+                with open(scored_segments_file, 'rb') as f:
+                    all_segments = pickle.load(f)
+            else:
+                video_files = self.get_video_clips_from_output_dir()
+                if not video_files:
+                    raise ValueError(f"No video files found in the specified input directories")
+
+                all_segments = []
+                # Analyze all videos and save individual highlights
+                logger.info("Analyzing videos and extracting highlights...")
+                for video_path in tqdm(video_files):
+                    try:
+                        # Detect scenes
+                        scenes = self.detect_scenes(video_path)
+                        
+                        # Score and select best segments
+                        scored_segments = self.select_best_segments(video_path, scenes)
+
+                        # Add to collection for combined highlight reel
+                        all_segments.extend(
+                            (video_path, start, end, index, score) 
+                            for start, end, score, index in scored_segments)
+
+                    except Exception as e:
+                        logger.error(f"Failed to process video {video_path}: {e}")
+                        continue  # Skip to the next video if processing fails
+                # Save the scored segments to a file
+                logger.info("Saving scored segments to file...")
+                with open(scored_segments_file, 'wb') as f:
+                    pickle.dump(all_segments, f)
+            
+            # Create combined highlight reel
+            logger.info("Creating combined highlight reel...")
+            
+            # Sort all segments by score
+            all_segments.sort(key=lambda x: x[4], reverse=True)
+            self.select_and_concatenate_clips(all_segments)
+
+        except Exception as e:
+            logger.error(f"Failed to create highlight reel: {str(e)}")
+            raise
+
+    def select_and_concatenate_clips(self, all_segments):
+        """
+        Select top segments until the target duration is reached and concatenate them.
+        """
+        selected_clips = []
+        total_duration = 0
+        for video_path, start, end, index, score in all_segments:
+            clip_duration = end - start
+            if total_duration + clip_duration > self.target_duration:
+                break
+            try:
+                clip = VideoFileClip(str(video_path)).subclip(start, end)
+                selected_clips.append((clip, start, end, index, score, video_path))
+                total_duration += clip_duration
+            except Exception as e:
+                logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
+                continue  # Skip to the next segment if adding fails
+
+        if self.keep_sort_processing_order:
+            if self.processing_order == "asc":
+                # Sort selected clips by their original indices
+                selected_clips.sort(key=lambda x: x[3])
+            elif self.processing_order == "desc":
+                # Sort selected clips by their original indices in reverse
+                selected_clips.sort(key=lambda x: x[3], reverse=True)
+        else:
+            # Randomly shuffle the selected clips
+            random.shuffle(selected_clips)
+
+        # Extract only the clips for concatenation
+        target_width = 1920
+        target_height = 1080
+        selected_clips = [clip for clip, _, _, _, _ in selected_clips]
+
+        if selected_clips:
+            resized_clips = []
+            for clip in selected_clips:
+                clip_width, clip_height = clip.size
+
+                if clip_width > clip_height:  # Landscape
+                    # Resize to target resolution directly
+                    resized_clip = resize(clip, width=target_width, height=target_height)
+                else:  # Portrait
+                    # Resize to fit the height and maintain aspect ratio
+                    resized_clip = resize(clip, height=target_height)
+                    # Center and add letterboxing
+                    letterbox_width = target_width - resized_clip.size[0]
+                    if letterbox_width > 0:
+                        # Use padding to add letterbox effect if necessary
+                        resized_clip = resized_clip.margin(left=letterbox_width // 2, right=letterbox_width // 2)
+
+                resized_clips.append(resized_clip)
+
+            # Concatenate and save the combined highlight reel
+            final_reel = concatenate_videoclips(resized_clips, method="compose")
+            output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
+            final_reel.write_videofile(
+                str(output_reel_path), codec='libx264', audio_codec='aac', bitrate='8000k'
+            )
+            logger.info(f"Combined highlight reel saved at: {output_reel_path}")
+        else:
+            logger.warning("No clips available for the combined highlight reel.")
 
     def create_summary_report(self):
         """Create a summary report of all extracted highlights."""
@@ -769,6 +850,8 @@ def main():
             max_video_duration_to_process=MAX_VIDEO_DURATION_TO_PROCESS
         )
         
+        # # Generate highlights by existing videos
+        # generator.create_highlight_reel_by_existing_clips()
         # Generate highlights
         generator.create_highlight_reel()
         
