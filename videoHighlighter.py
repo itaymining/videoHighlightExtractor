@@ -19,12 +19,14 @@ import cv2
 import numpy as np
 from collections import deque
 from moviepy.editor import VideoFileClip, concatenate_videoclips
+from moviepy.video.fx.resize import resize
 from scenedetect import detect, ContentDetector
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing import image
 from tqdm import tqdm
 import pickle
+
 
 # Configure logging
 logging.basicConfig(
@@ -636,22 +638,47 @@ class VideoHighlightGenerator:
                 # randomly shuffle the selected clips
                 random.shuffle(selected_clips)
 
-            # Extract only the clips for concatenation
 
             # Concatenate and save the combined highlight reel
+            # Extract only the clips for concatenation
+            # Define the target resolution
+            target_width = 1920
+            target_height = 1080
+
+            # Extract only the clips for concatenation
             selected_clips = [clip for clip, _, _, _, _ in selected_clips]
+            
             if selected_clips:
-                final_reel = concatenate_videoclips(selected_clips, method="compose")
+                resized_clips = []
+                for clip in selected_clips:
+                    clip_width, clip_height = clip.size
+                    
+                    if clip_width > clip_height:  # Landscape
+                        # Resize to target resolution directly
+                        resized_clip = resize(clip, width=target_width, height=target_height)
+                    else:  # Portrait
+                        # Resize to fit the height and maintain aspect ratio
+                        resized_clip = resize(clip, height=target_height)
+                        # Center and add letterboxing
+                        letterbox_width = target_width - resized_clip.size[0]
+                        if letterbox_width > 0:
+                            # Use padding to add letterbox effect if necessary
+                            resized_clip = resized_clip.margin(left=letterbox_width//2, right=letterbox_width//2)
+
+                    resized_clips.append(resized_clip)
+
+                # Concatenate and save the combined highlight reel
+                final_reel = concatenate_videoclips(resized_clips, method="compose")
                 output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
                 final_reel.write_videofile(
-                    str(output_reel_path), codec='libx264', audio_codec='aac'
+                    str(output_reel_path), codec='libx264', audio_codec='aac', bitrate='8000k'
                 )
                 logger.info(f"Combined highlight reel saved at: {output_reel_path}")
             else:
                 logger.warning("No clips available for the combined highlight reel.")
-
         except Exception as e:
-            logger.error(f"An error occurred while creating the highlight reel: {e}")
+            logger.error(f"Failed to create highlight reel: {str(e)}")
+            raise
 
 
     def create_summary_report(self):
@@ -691,18 +718,9 @@ def main():
     """
     # Configuration
     INPUT_DIRS = [  
-                    "2023-11"
+                    "2023-11",
                     "2023-12",
-                    "2024-01",
-                    "2024-02",
-                    "2024-03",
-                    "2024-04",
-                    "2024-05",
-                    "2024-06",
-                    "2024-07",
-                    "2024-08",
-                    "2024-09",
-                    "2024-10"
+                    
                   ]  # List of input directories
     # OUTPUT_DIR = "video_highlights_no_faces2"
     # PICKLE_PATH = "known_faces11"
@@ -718,7 +736,7 @@ def main():
     # PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
     # MAX_VIDEO_DURATION_TO_PROCESS = 60  # Maximum video duration to process
 
-    OUTPUT_DIR = "video_highlights_no_face3"
+    OUTPUT_DIR = "video_highlights_no_face4"
     PICKLE_PATH = "known_faces11"
     TARGET_DURATION = 600  # 10 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
