@@ -613,13 +613,13 @@ class VideoHighlightGenerator:
             # Select top segments until the target duration is reached
             selected_clips = []
             total_duration = 0
-            for video_path, start, end, score, index in all_segments:
+            for video_path, start, end, index, score in all_segments:
                 clip_duration = end - start
                 if total_duration + clip_duration > self.target_duration:
                     break
                 try:
                     clip = VideoFileClip(str(video_path)).subclip(start, end)
-                    selected_clips.append(clip)
+                    selected_clips.append((clip, start, end, index, score, video_path))
                     total_duration += clip_duration
                 except Exception as e:
                     logger.error(f"Failed to add clip from {video_path} to combined reel: {e}")
@@ -639,6 +639,7 @@ class VideoHighlightGenerator:
             # Extract only the clips for concatenation
 
             # Concatenate and save the combined highlight reel
+            selected_clips = [clip for clip, _, _, _, _ in selected_clips]
             if selected_clips:
                 final_reel = concatenate_videoclips(selected_clips, method="compose")
                 output_reel_path = self.output_dir / "combined_highlight_reel.mp4"
