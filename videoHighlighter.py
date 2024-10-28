@@ -337,15 +337,12 @@ class VideoHighlightGenerator:
         Returns:
             List[Tuple[float, float]]: List of (start_time, end_time) tuples
         """
+        logger.info(f"Detecting scenes in {video_path.name}...")
         video = cv2.VideoCapture(str(video_path))
         self.fps = video.get(cv2.CAP_PROP_FPS)
         total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         
-        scenes = []
-        prev_frame = None
-        current_scene_start = 0
-        frame_count = 0
-
+        # Check if video duration exceeds the maximum allowed
         video_duration = total_frames / self.fps
         
         # Return empty if the video duration exceeds the max_video_duration_to_process
@@ -354,13 +351,18 @@ class VideoHighlightGenerator:
             logger.warning(f"Skipping video {video_path.name} as it exceeds the maximum duration allowed {self.max_video_duration_to_process:.2f}s for processing. {video_duration:.2f}s")
             return []
         
+        scenes = []
+        prev_frame = None
+        current_scene_start = 0
+        frame_count = 0
+        
         while True:
             ret, frame = video.read()
             if not ret:
                 break
                 
             if prev_frame is not None:
-                # Check for scene change using content detector
+                # Only appends scenes when a change is detected
                 if self.is_scene_change(prev_frame, frame):
                     scene_end = frame_count / self.fps
                     if scene_end - current_scene_start >= self.min_clip_duration:
@@ -370,6 +372,11 @@ class VideoHighlightGenerator:
             prev_frame = frame
             frame_count += 1
         
+        # Fixed version - Add the final scene if it meets duration requirement
+        final_scene_end = frame_count / self.fps
+        if final_scene_end - current_scene_start >= self.min_clip_duration:
+            scenes.append((current_scene_start, final_scene_end))
+            
         video.release()
         return scenes
     
@@ -683,8 +690,7 @@ def main():
     """
     # Configuration
     INPUT_DIRS = [  
-                    "2023-10",
-                    "2023-11",
+                    "2023-11"
                     "2023-12",
                     "2024-01",
                     "2024-02",
@@ -695,9 +701,23 @@ def main():
                     "2024-07",
                     "2024-08",
                     "2024-09",
-                     "2024-10"
+                    "2024-10"
                   ]  # List of input directories
-    OUTPUT_DIR = "video_highlights_faces"
+    # OUTPUT_DIR = "video_highlights_no_faces2"
+    # PICKLE_PATH = "known_faces11"
+    # TARGET_DURATION = 600  # 10 minutes
+    # MIN_CLIP_DURATION = 3  # Minimum duration for each clip
+    # MAX_CLIP_DURATION = 12  # Maximum duration for each clip
+    # FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
+    # HAS_FACE_ONLY = True  # Only include segments with faces
+    # HIGHLIGHTS_PER_VIDEO = 1  # Number of highlights to extract per video
+    # FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
+    # SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
+    # KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
+    # PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
+    # MAX_VIDEO_DURATION_TO_PROCESS = 60  # Maximum video duration to process
+
+    OUTPUT_DIR = "video_highlights_no_face3"
     PICKLE_PATH = "known_faces11"
     TARGET_DURATION = 600  # 10 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
@@ -705,11 +725,11 @@ def main():
     FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
     HAS_FACE_ONLY = False  # Only include segments with faces
     HIGHLIGHTS_PER_VIDEO = 1  # Number of highlights to extract per video
-    FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
+    FACE_RECOGNITION_DIR = ""  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
-    MAX_VIDEO_DURATION_TO_PROCESS = 180  # Maximum video duration to process
+    MAX_VIDEO_DURATION_TO_PROCESS = 120  # Maximum video duration to process
     
     try:
         # Create highlight generator
