@@ -835,9 +835,9 @@ def main():
     # PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
     # MAX_VIDEO_DURATION_TO_PROCESS = 60  # Maximum video duration to process
 
-    OUTPUT_DIR = "video_highlights_no_face4"
+    OUTPUT_DIR = "video_highlights_no_face_new"
     PICKLE_PATH = "known_faces11"
-    TARGET_DURATION = 600  # 15 minutes
+    TARGET_DURATION = 300  # 15 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 6  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
@@ -847,7 +847,7 @@ def main():
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
-    MAX_VIDEO_DURATION_TO_PROCESS = 120  # Maximum video duration to process
+    MAX_VIDEO_DURATION_TO_PROCESS = 30  # Maximum video duration to process
     
     try:
         # Create highlight generator
