@@ -130,6 +130,7 @@ class VideoHighlightGenerator:
                  has_face_only: bool = False,  # Only include segments with faces
                  highlights_per_video: int = 5, # Number of highlights to extract per video
                  face_images_dir: str = None,  # Directory containing images of known faces
+                 use_face_recongniion: bool = False,  # Use face recognition for analysis
                  keep_sort_processing_order: bool = True,  # Keep the order of processing
                  processing_order: str = "asc",  # Order of processing (asc or desc
                  pickle_path: str = None,  # Path to save known faces encodings
@@ -154,7 +155,8 @@ class VideoHighlightGenerator:
         self.max_clip_duration = max_clip_duration
         self.face_detect_min_duration = face_detect_min_duration
         self.highlights_per_video = highlights_per_video
-        self.face_images_dir = Path(face_images_dir) if face_images_dir else None
+        self.use_face_recongniion = use_face_recongniion
+        self.face_images_dir = Path(face_images_dir) if self.use_face_recongniion and use_face_recongniion else None
         self.save_video_highlight_txt_metadata = save_video_highlight_txt_metadata
         self.keep_sort_processing_order = keep_sort_processing_order
         self.processing_order = processing_order
@@ -165,7 +167,7 @@ class VideoHighlightGenerator:
         self.max_video_duration_to_process = max_video_duration_to_process
         self.known_faces_encodings = self.load_known_faces() if self.face_images_dir else []
         self.face_recognizer = FaceRecognizer(threshold=0.5, min_matches=3)
-        self.has_face_only = has_face_only and bool(self.known_faces_encodings)
+        self.has_face_only = self.face_images_dir and self.use_face_recongniion and has_face_only and bool(self.known_faces_encodings) 
         # Add your known face encodings
         if self.known_faces_encodings:
             self.face_recognizer.add_known_face(self.known_faces_encodings)
@@ -819,6 +821,16 @@ def main():
     INPUT_DIRS = [  
                     "2023-11",
                     "2023-12",
+                    "2024-01",
+                    "2024-02",
+                    "2024-03",
+                    "2024-04",
+                    "2024-05",
+                    "2024-06",
+                    "2024-07",
+                    "2024-08",
+                    "2024-09",
+                    "2024-10",
                     
                   ]  # List of input directories
     # OUTPUT_DIR = "video_highlights_no_faces2"
@@ -836,14 +848,15 @@ def main():
     # MAX_VIDEO_DURATION_TO_PROCESS = 60  # Maximum video duration to process
 
     OUTPUT_DIR = "video_highlights_no_face_new"
-    PICKLE_PATH = "known_faces11"
+    PICKLE_PATH = "known_faces"
     TARGET_DURATION = 300  # 15 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 6  # Maximum duration for each clip
-    FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
+    FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
+    USE_FACE_RECOGNITION = False  # Use face recognition
     HAS_FACE_ONLY = False  # Only include segments with faces
     HIGHLIGHTS_PER_VIDEO = 2  # Number of highlights to extract per video
-    FACE_RECOGNITION_DIR = ""  # Directory containing images of known faces
+    FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
@@ -862,6 +875,7 @@ def main():
             has_face_only = HAS_FACE_ONLY,
             highlights_per_video= HIGHLIGHTS_PER_VIDEO, 
             face_images_dir=FACE_RECOGNITION_DIR,
+            use_face_recongniion=USE_FACE_RECOGNITION,
             keep_sort_processing_order=KEEP_SORT_PROCESSING_ORDER,
             processing_order=PROCESSING_ORDER,
             pickle_path=PICKLE_PATH,
