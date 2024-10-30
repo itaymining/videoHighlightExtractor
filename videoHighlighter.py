@@ -16,6 +16,7 @@ import random
 import shutil
 import face_recognition
 import cv2
+import pickle
 import numpy as np
 from collections import deque
 from moviepy.editor import VideoFileClip, concatenate_videoclips
@@ -25,7 +26,8 @@ from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing import image
 from tqdm import tqdm
-import pickle
+from datetime import datetime
+
 
 
 # Configure logging
@@ -739,8 +741,11 @@ class VideoHighlightGenerator:
             logger.warning("No clips available for processing.")
             return None
 
-        # Create a clips directory if it doesn't exist
-        clips_dir = self.output_dir / "individual_clips"
+        # Get the current date in a specific format, e.g., YYYY-MM-DD
+        current_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Create a clips directory with the current date in the name if it doesn't exist
+        clips_dir = self.output_dir / f"individual_clips_{current_date}"
         clips_dir.mkdir(parents=True, exist_ok=True)
 
         resized_clips = []
@@ -849,7 +854,7 @@ def main():
 
     OUTPUT_DIR = "video_highlights_no_face_new"
     PICKLE_PATH = "known_faces"
-    TARGET_DURATION = 300  # 15 minutes
+    TARGET_DURATION = 600  # 15 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 6  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
