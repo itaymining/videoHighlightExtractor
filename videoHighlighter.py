@@ -827,20 +827,20 @@ def main():
                     "אישגל 2024_2024-02"
                   ]  # List of input directories
 
-    OUTPUT_DIR = "video_highlights_no_face_new"
-    PICKLE_PATH = "known_faces"
-    TARGET_DURATION = 180 # 15 minutes
+    OUTPUT_DIR = "video_highlights"  # Output directory
+    PICKLE_PATH = "known_faces" # Path to save known faces encodings
+    TARGET_DURATION = 180 # in seconds
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
-    MAX_CLIP_DURATION = 6  # Maximum duration for each clip
-    FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
+    MAX_CLIP_DURATION = 5  # Maximum duration for each clip
+    FACE_DETECT_MIN_DURATION = 1  # Minimum duration for face detection
     USE_FACE_RECOGNITION = False  # Use face recognition
     HAS_FACE_ONLY = False  # Only include segments with faces
-    HIGHLIGHTS_PER_VIDEO = 4  # Number of highlights to extract per video
+    HIGHLIGHTS_PER_VIDEO = 2  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
-    MAX_VIDEO_DURATION_TO_PROCESS = 300  # Maximum video duration to process
+    MAX_VIDEO_DURATION_TO_PROCESS = 600  # Maximum video duration to process
     
     try:
         # Create highlight generator
