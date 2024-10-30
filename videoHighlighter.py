@@ -824,48 +824,23 @@ def main():
     """
     # Configuration
     INPUT_DIRS = [  
-                    "2023-11",
-                    "2023-12",
-                    "2024-01",
-                    "2024-02",
-                    "2024-03",
-                    "2024-04",
-                    "2024-05",
-                    "2024-06",
-                    "2024-07",
-                    "2024-08",
-                    "2024-09",
-                    "2024-10",
-                    
+                    "אישגל 2024_2024-02"
                   ]  # List of input directories
-    # OUTPUT_DIR = "video_highlights_no_faces2"
-    # PICKLE_PATH = "known_faces11"
-    # TARGET_DURATION = 600  # 10 minutes
-    # MIN_CLIP_DURATION = 3  # Minimum duration for each clip
-    # MAX_CLIP_DURATION = 12  # Maximum duration for each clip
-    # FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
-    # HAS_FACE_ONLY = True  # Only include segments with faces
-    # HIGHLIGHTS_PER_VIDEO = 1  # Number of highlights to extract per video
-    # FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
-    # SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
-    # KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
-    # PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
-    # MAX_VIDEO_DURATION_TO_PROCESS = 60  # Maximum video duration to process
 
     OUTPUT_DIR = "video_highlights_no_face_new"
     PICKLE_PATH = "known_faces"
-    TARGET_DURATION = 600  # 15 minutes
+    TARGET_DURATION = 180 # 15 minutes
     MIN_CLIP_DURATION = 3  # Minimum duration for each clip
     MAX_CLIP_DURATION = 6  # Maximum duration for each clip
     FACE_DETECT_MIN_DURATION = 2  # Minimum duration for face detection
     USE_FACE_RECOGNITION = False  # Use face recognition
     HAS_FACE_ONLY = False  # Only include segments with faces
-    HIGHLIGHTS_PER_VIDEO = 2  # Number of highlights to extract per video
+    HIGHLIGHTS_PER_VIDEO = 4  # Number of highlights to extract per video
     FACE_RECOGNITION_DIR = "faces"  # Directory containing images of known faces
     SAVE_VIDEO_HIGHLIGHT_TXT_METADATA = False  # Save metadata in txt file
     KEEP_SORT_PROCESSING_ORDER = True  # Keep the order of processing
     PROCESSING_ORDER = "asc"  # Order of processing (asc or desc)
-    MAX_VIDEO_DURATION_TO_PROCESS = 30  # Maximum video duration to process
+    MAX_VIDEO_DURATION_TO_PROCESS = 300  # Maximum video duration to process
     
     try:
         # Create highlight generator

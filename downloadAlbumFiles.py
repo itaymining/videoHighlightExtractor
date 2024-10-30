@@ -231,30 +231,32 @@ class GooglePhotosDownloader:
         # Get album title from cache
         album_title = next((album['title'] for album in self._albums_cache if album['id'] == album_id), None)
         
-        # Retrieve initial count of media items
-        total_videos = 0
-        media_items_preview = self.service.mediaItems().search(
-            body={'albumId': album_id, 'pageSize': 100}
-        ).execute()
-        for item in media_items_preview.get('mediaItems', []):
-            if 'video' in item['mimeType']:
-                creation_time = item['mediaMetadata']['creationTime']
-                creation_date = self.parse_datetime(creation_time)
-                if start_date <= creation_date.isoformat() <= end_date:
-                    total_videos += 1
+        
+        while True:
+            try:
+                # Prepare request for media items
+                request_body = {'albumId': album_id, 'pageSize': 100}
+                if next_page_token:
+                    request_body['pageToken'] = next_page_token
+                
+                logger.info(f"Retrieving Media next_page_token: {next_page_token}")
 
-        # Initialize tqdm progress bar
-        with tqdm(total=total_videos, desc="Downloading videos", unit="video") as pbar:
-            while True:
-                try:
-                    # Prepare request for media items
-                    request_body = {'albumId': album_id, 'pageSize': 100}
-                    if next_page_token:
-                        request_body['pageToken'] = next_page_token
-                    
-                    # Retrieve media items
-                    media_items = self.service.mediaItems().search(body=request_body).execute()
-                    
+                # Retrieve media items
+                media_items = self.service.mediaItems().search(body=request_body).execute()
+                
+                # Retrieve initial count of media items
+                total_videos = 0
+                media_items = media_items
+                for item in media_items.get('mediaItems', []):
+                    if 'video' in item['mimeType']:
+                        creation_time = item['mediaMetadata']['creationTime']
+                        creation_date = self.parse_datetime(creation_time)
+                        if start_date <= creation_date.isoformat() <= end_date:
+                            total_videos += 1
+
+                # Initialize tqdm progress bar
+                with tqdm(total=total_videos, desc="Downloading videos", unit="video") as pbar:
+
                     # Process each media item
                     for item in media_items.get('mediaItems', []):
                         if 'video' in item['mimeType']:
@@ -272,9 +274,9 @@ class GooglePhotosDownloader:
                     if not next_page_token:
                         break
                         
-                except Exception as e:
-                    logger.error(f"Error processing media items: {str(e)}")
-                    raise
+            except Exception as e:
+                logger.error(f"Error processing media items: {str(e)}")
+                raise
             
         logger.info(f"Total videos downloaded: {videos_downloaded}")
     
