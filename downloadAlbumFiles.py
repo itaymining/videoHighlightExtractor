@@ -21,6 +21,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from tqdm import tqdm
+
 
 # Configure logging
 logging.basicConfig(
@@ -34,7 +36,10 @@ class GooglePhotosDownloader:
     A class to handle authentication and downloading of videos from Google Photos.
     """
     
-    SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
+    SCOPES = [
+        'https://www.googleapis.com/auth/photoslibrary.readonly',
+        'https://www.googleapis.com/auth/photoslibrary.sharing'
+    ]
     
     def __init__(self, client_secret_file: str, token_file: str = 'token.json'):
         """
@@ -115,30 +120,52 @@ class GooglePhotosDownloader:
         
         raise ValueError(f"Time data '{timestamp}' does not match any expected formats")
     
-    def list_albums(self) -> List[Dict[str, str]]:
+    def list_all_albums(self) -> List[Dict[str, str]]:
         """
-        Retrieve and return list of albums.
+        Retrieve and return list of both owned and shared albums.
         
         Returns:
-            List[Dict[str, str]]: List of albums with their IDs and titles
+            List[Dict[str, str]]: List of all albums with their IDs and titles
         """
+        all_albums = []
+        
         try:
-            albums = self.service.albums().list().execute()
-            self._albums_cache = albums.get('albums', [])  # Cache albums for validation
-            return self._albums_cache
+            # Get owned albums
+            owned_albums_response = self.service.albums().list().execute()
+            owned_albums = owned_albums_response.get('albums', [])
+            for album in owned_albums:
+                album['type'] = 'owned'
+                all_albums.append(album)
+            
+            # Get shared albums
+            shared_albums_response = self.service.sharedAlbums().list().execute()
+            shared_albums = shared_albums_response.get('sharedAlbums', [])
+            for album in shared_albums:
+                album['type'] = 'shared'
+                if not 'title' in album:
+                    album['title'] = 'Untitled Shared Album'
+                all_albums.append(album)
+            
+            self._albums_cache = all_albums
+            return all_albums
+            
         except Exception as e:
             logger.error(f"Failed to retrieve albums: {str(e)}")
             raise
 
     def display_albums(self) -> None:
         """
-        Display available albums in a numbered list format.
+        Display available albums in a numbered list format, showing both owned and shared albums.
         """
-        print("\nAvailable Albums:")
-        print("-" * 50)
+        logger.info("\nAvailable Albums:")
+        logger.info("-" * 70)
+        logger.info(f"{'#':<4} {'Type':<8} {'Title':<50}")
+        logger.info("-" * 70)
+        
         for idx, album in enumerate(self._albums_cache, 1):
-            print(f"{idx}. {album['title']}")
-        print("-" * 50)
+            album_type = album.get('type', 'owned')
+            logger.info(f"{idx:<4} {album_type:<8} {album['title']:<50} ({album['mediaItemsCount']} items in album {album['id']})")
+        logger.info("-" * 70)
 
     def get_user_selected_album(self) -> Dict[str, str]:
         """
@@ -158,12 +185,12 @@ class GooglePhotosDownloader:
                 
                 if 0 <= idx < len(self._albums_cache):
                     selected_album = self._albums_cache[idx]
-                    print(f"\nSelected album: {selected_album['title']}")
+                    logger.info(f"\nSelected album: {selected_album['title']} ({selected_album['type']} album)")
                     return selected_album
                 else:
-                    print("\nError: Invalid selection. Please choose a number from the list.")
+                    logger.info("\nError: Invalid selection. Please choose a number from the list.")
             except ValueError:
-                print("\nError: Please enter a valid number.")
+                logger.warning("\nError: Please enter a valid number.")
 
     def get_date_input(self, prompt: str) -> str:
         """
@@ -183,10 +210,9 @@ class GooglePhotosDownloader:
                 # Return in proper format for the API
                 return f"{date_str}T00:00:00Z"
             except ValueError:
-                print("Invalid date format. Please use YYYY-MM-DD format (e.g., 2024-01-31)")
+                logger.warning("Invalid date format. Please use YYYY-MM-DD format (e.g., 2024-01-31)")
     
-    def download_videos(self, album_id: str, start_date: str, end_date: str, 
-                       output_dir: str = '.') -> None:
+    def download_videos(self, album_id: str, start_date: str, end_date: str, output_dir: str = '.') -> None:
         """
         Download videos from specified album within date range.
         
@@ -201,41 +227,59 @@ class GooglePhotosDownloader:
         """
         next_page_token = None
         videos_downloaded = 0
+
+        # Get album title from cache
+        album_title = next((album['title'] for album in self._albums_cache if album['id'] == album_id), None)
         
-        while True:
-            try:
-                # Prepare request for media items
-                request_body = {'albumId': album_id, 'pageSize': 100}
-                if next_page_token:
-                    request_body['pageToken'] = next_page_token
-                
-                # Retrieve media items
-                media_items = self.service.mediaItems().search(body=request_body).execute()
-                
-                # Process each media item
-                for item in media_items.get('mediaItems', []):
-                    if 'video' in item['mimeType']:
-                        creation_time = item['mediaMetadata']['creationTime']
-                        creation_date = self.parse_datetime(creation_time)
-                        
-                        # Check if video is within date range
-                        if start_date <= creation_date.isoformat() <= end_date:
-                            self._download_video(item, creation_date, output_dir)
-                            videos_downloaded += 1
-                
-                # Check for more pages
-                next_page_token = media_items.get('nextPageToken')
-                if not next_page_token:
-                    break
+        # Retrieve initial count of media items
+        total_videos = 0
+        media_items_preview = self.service.mediaItems().search(
+            body={'albumId': album_id, 'pageSize': 100}
+        ).execute()
+        for item in media_items_preview.get('mediaItems', []):
+            if 'video' in item['mimeType']:
+                creation_time = item['mediaMetadata']['creationTime']
+                creation_date = self.parse_datetime(creation_time)
+                if start_date <= creation_date.isoformat() <= end_date:
+                    total_videos += 1
+
+        # Initialize tqdm progress bar
+        with tqdm(total=total_videos, desc="Downloading videos", unit="video") as pbar:
+            while True:
+                try:
+                    # Prepare request for media items
+                    request_body = {'albumId': album_id, 'pageSize': 100}
+                    if next_page_token:
+                        request_body['pageToken'] = next_page_token
                     
-            except Exception as e:
-                logger.error(f"Error processing media items: {str(e)}")
-                raise
-        
+                    # Retrieve media items
+                    media_items = self.service.mediaItems().search(body=request_body).execute()
+                    
+                    # Process each media item
+                    for item in media_items.get('mediaItems', []):
+                        if 'video' in item['mimeType']:
+                            creation_time = item['mediaMetadata']['creationTime']
+                            creation_date = self.parse_datetime(creation_time)
+                            
+                            # Check if video is within date range
+                            if start_date <= creation_date.isoformat() <= end_date:
+                                self._download_video(item, creation_date, output_dir, album_title)
+                                videos_downloaded += 1
+                                pbar.update(1)  # Update the progress bar
+                    
+                    # Check for more pages
+                    next_page_token = media_items.get('nextPageToken')
+                    if not next_page_token:
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error processing media items: {str(e)}")
+                    raise
+            
         logger.info(f"Total videos downloaded: {videos_downloaded}")
     
     def _download_video(self, media_item: Dict[str, Any], 
-                       creation_date: datetime, output_dir: str) -> None:
+                       creation_date: datetime, output_dir: str, album_title: str = None) -> None:
         """
         Download a single video and save it to the appropriate folder.
         
@@ -245,9 +289,16 @@ class GooglePhotosDownloader:
             output_dir (str): Base directory for downloaded videos
         """
         try:
-            # Create month-based folder
-            month_folder = os.path.join(output_dir, creation_date.strftime('%Y-%m'))
-            os.makedirs(month_folder, exist_ok=True)
+            # Sanitize album title for file system
+            if album_title:
+                # Remove any characters that might cause issues in file paths
+                safe_album_title = "".join(c for c in album_title if c.isalnum() or c in (' ', '-', '_'))
+                safe_album_title = safe_album_title.strip()
+            else:
+                safe_album_title = "Untitled_Album"
+            # Create folder with format: YYYY-MM_AlbumName
+            folder_name = f"{safe_album_title}_{creation_date.strftime('%Y-%m')}"
+            os.makedirs(folder_name, exist_ok=True)
             
             # Download video
             media_url = f"{media_item['baseUrl']}=dv"
@@ -255,7 +306,7 @@ class GooglePhotosDownloader:
             response.raise_for_status()
             
             # Save video
-            output_path = os.path.join(month_folder, media_item['filename'])
+            output_path = os.path.join(folder_name, media_item['filename'])
             with open(output_path, 'wb') as f:
                 f.write(response.content)
             logger.info(f"Downloaded: {media_item['filename']}")
@@ -276,19 +327,21 @@ def main():
         downloader = GooglePhotosDownloader(CLIENT_SECRET_FILE)
         downloader.authenticate()
         
-        # List all albums and get user selection
-        downloader.list_albums()
+        # List all albums (including shared ones) and get user selection
+        downloader.list_all_albums()
         selected_album = downloader.get_user_selected_album()
         
         # Get date range from user
-        print("\nPlease enter the date range for videos to download.")
-        print("Use format YYYY-MM-DD (e.g., 2024-01-31)")
+        logger.info("\nPlease enter the date range for videos to download.")
+        logger.info("Use format YYYY-MM-DD (e.g., 2024-01-31)")
         start_date = downloader.get_date_input("Start date: ")
         end_date = downloader.get_date_input("End date: ")
         
         # Download videos
-        print("\nStarting download...")
-        downloader.download_videos(selected_album['id'], start_date, end_date)
+        logger.info("\nStarting download...")
+        album_id = selected_album.get('id')
+    
+        downloader.download_videos(album_id, start_date, end_date)
         logger.info("Video download completed successfully")
         
     except Exception as e:
