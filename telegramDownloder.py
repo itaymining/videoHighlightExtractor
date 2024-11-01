@@ -65,6 +65,7 @@ async def download_channel_videos(api_id, api_hash, channel_username, start_date
             filepath = os.path.join(output_dir, filename)
             
             if is_duplicate_file(filepath, output_dir):
+                print(f"Skipping duplicate file: {filename}")
                 continue
             
             try:
