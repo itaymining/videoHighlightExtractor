@@ -1,0 +1,70 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.myenv/
+env/
+myenv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# macOS system files
+.DS_Store
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Python package files
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Pytest cache
+.pytest_cache/
+
+# Editor and IDE settings
+.vscode/
+.idea/
+*.iml
+
+# MoviePy temporary files
+temp-audio.m4a
+temp-video.mp4
+moviepy_temp/
+
+# Ignore media files if necessary
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.jpg
+*.png
+
+# Credentials / secrets
+.env
+sa1.json
+token.json
+*.credentials.json
+client_secret*.json
+credentials/*
+!credentials/.gitkeep
+
+# Telegram session files
+*.session
+*.session-journal
+
+# Face encoding cache
+known_faces
+known_faces.meta.json
+
+# Highlighter output
+video_highlights/
+video_highlights_v2/
+downloads/
