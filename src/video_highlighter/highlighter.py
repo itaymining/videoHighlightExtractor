@@ -478,6 +478,8 @@ class VideoHighlightGenerator:
 
         for start, end in scenes:
             self.index += 1
+            # Frame-count timing can overshoot moviepy's duration by a fraction of a frame
+            end = min(end, video.duration)
             # Limit segment duration
             duration = end - start
             if duration > self.max_clip_duration:
