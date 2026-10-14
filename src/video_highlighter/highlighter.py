@@ -16,7 +16,7 @@ import random
 import shutil
 import pickle
 import numpy as np
-from moviepy import VideoFileClip, concatenate_videoclips
+from moviepy import VideoFileClip, concatenate_videoclips, vfx
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing import image
@@ -138,7 +138,7 @@ class VideoHighlightGenerator:
         """
         try:
             video = VideoFileClip(str(video_path))
-            clip = video.with_start(start).with_duration(end)
+            clip = video.subclipped(start, end)
 
             # Create filename
             output_filename = self.get_safe_filename(video_path, highlight_num)
@@ -390,7 +390,7 @@ class VideoHighlightGenerator:
         Returns:
             float: Segment interest score between 0 and 1
         """
-        segment = video.with_start(start).with_duration(end)
+        segment = video.subclipped(start, end)
         frames = list(segment.iter_frames())
 
         if len(frames) < 2:
@@ -622,7 +622,7 @@ class VideoHighlightGenerator:
             if total_duration + clip_duration > self.target_duration:
                 break
             try:
-                clip = VideoFileClip(str(video_path)).with_start(start).with_duration(end)
+                clip = VideoFileClip(str(video_path)).subclipped(start, end)
                 selected_clips.append((clip, start, end, index, score, video_path))
                 total_duration += clip_duration
             except Exception as e:
@@ -661,15 +661,15 @@ class VideoHighlightGenerator:
             clip_width, clip_height = clip.size
 
             if clip_width > clip_height:  # Landscape
-                resized_clip = clip.resized(clip, width=target_width, height=target_height)
+                resized_clip = clip.resized((target_width, target_height))
             else:  # Portrait
-                resized_clip = clip.resized(clip, height=target_height)
+                resized_clip = clip.resized(height=target_height)
                 letterbox_width = target_width - resized_clip.size[0]
                 if letterbox_width > 0:
-                    resized_clip = resized_clip.margin(
+                    resized_clip = resized_clip.with_effects([vfx.Margin(
                         left=letterbox_width // 2,
                         right=letterbox_width // 2
-                    )
+                    )])
 
             # Save individual clip
             clip_filename = f"clip_{index:03d}.mp4"  # This will create names like clip_001.mp4
