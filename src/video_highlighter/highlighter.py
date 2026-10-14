@@ -23,7 +23,6 @@ from tensorflow.keras.preprocessing import image
 from tqdm import tqdm
 from datetime import datetime
 import cv2
-import face_recognition
 
 from .face_recognizer import FaceRecognizer
 
@@ -366,6 +365,7 @@ class VideoHighlightGenerator:
                 return pickle.load(f)
 
         logger.info("Building known faces cache...")
+        import face_recognition  # optional dependency, only needed for face recognition
         # Otherwise, generate encodings and update cache
         known_encodings = []
         for image_path in self.face_images_dir.glob("*.jpg"):

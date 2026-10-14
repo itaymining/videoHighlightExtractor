@@ -3,7 +3,6 @@ from typing import List, Tuple
 
 import numpy as np
 import cv2
-import face_recognition
 
 
 class FaceRecognizer:
@@ -21,6 +20,8 @@ class FaceRecognizer:
         Check if the known person appears in the frame.
         Returns: Tuple of (is_match: bool, confidence: float)
         """
+        import face_recognition  # optional dependency, only needed for face recognition
+
         # Convert to RGB (face_recognition expects RGB)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
